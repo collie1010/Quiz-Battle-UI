@@ -173,21 +173,6 @@ const SERVER_URL = process.env.VUE_APP_WEBSOCKET_URL || 'ws://localhost:8080/ws'
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 開啟 Pull Request
 
-### 開發規範
 
-- 使用 ESLint 規範程式碼風格
-- 組件使用 Vue 3 Composition API
-- 遵循現有的命名慣例
-- 新功能請附上適當的測試
 
-## 📄 授權條款
 
-本專案採用 MIT 授權條款 - 詳見 [LICENSE](LICENSE) 文件
-
-## 🙏 致謝
-
-感謝所有為華語學習做出貢獻的開發者和教育工作者！
-
----
-
-**快來挑戰自己，成為華語知識王者吧！** 🌟
