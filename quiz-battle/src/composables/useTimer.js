@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 
-export function useTimer(duration = 8) {
+export function useTimer(duration = 10) {
   const timeLeft = ref(duration)
   let intervalId = null
 

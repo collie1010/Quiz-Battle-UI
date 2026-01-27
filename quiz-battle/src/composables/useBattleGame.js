@@ -2,9 +2,19 @@ import { ref, reactive } from 'vue'
 import { Client } from '@stomp/stompjs'
 import SockJS from 'sockjs-client'
 
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export function useBattleGame() {
   const gameState = ref('LOBBY')
-  const playerInfo = reactive({ roomId: '', playerId: '' })
+  const playerInfo = reactive({ 
+    roomId: '', 
+    playerId: '',
+    playerName: '' })
 
   const currentQuestion = ref(null)
   const questionIndex = ref(0) // 目前題號 (0-based)
@@ -13,6 +23,7 @@ export function useBattleGame() {
   const myScore = ref(0)
   const enemyScore = ref(0)
   const enemyId = ref('等待中...') // ⭐ 新增：對手 ID
+  const enemyName = ref('等待中...') 
 
   const isMyTurnAnswered = ref(false)
   const isTimeout = ref(false) 
@@ -25,8 +36,10 @@ export function useBattleGame() {
   let hiddenAnswer = null 
 
   // 改名：joinGame -> findMatch (不需要 roomId 參數了)
-  const findMatch = (playerId) => {
-    playerInfo.playerId = playerId
+  const findMatch = (inputNickname) => {
+    const myUUID = generateUUID();
+    playerInfo.playerId = myUUID
+    playerInfo.playerName = inputNickname
     gameState.value = 'WAITING' // 顯示等待畫面
     isMatching.value = true
 
@@ -37,7 +50,7 @@ export function useBattleGame() {
 
     stompClient.onConnect = () => {
       // 1. ⭐ 訂閱「個人頻道」接收配對結果
-      stompClient.subscribe(`/topic/player/${playerId}`, (msg) => {
+      stompClient.subscribe(`/topic/player/${myUUID}`, (msg) => {
         const matchData = JSON.parse(msg.body)
         
         if (matchData.success) {
@@ -57,7 +70,9 @@ export function useBattleGame() {
       // 3. 發送配對請求
       stompClient.publish({
         destination: '/app/match',
-        body: JSON.stringify({ playerId: playerId }) // 不需要 roomId
+        body: JSON.stringify({ 
+          playerId: myUUID,
+          playerName: inputNickname }) // 不需要 roomId
       })
     }
     stompClient.activate()
@@ -81,8 +96,10 @@ export function useBattleGame() {
       if (data.p1Id && data.p2Id) {
         if (data.p1Id === playerInfo.playerId) {
           enemyId.value = data.p2Id // 我是 P1，對手是 P2
+          enemyName.value = data.p2Name
         } else {
           enemyId.value = data.p1Id // 我是 P2，對手是 P1
+          enemyName.value = data.p1Name
         }
       }
 
@@ -205,7 +222,7 @@ export function useBattleGame() {
     totalQuestions,
     myScore,
     enemyScore,
-    enemyId, // 回傳對手 ID
+    enemyName,
     isTimeout,
     isMyTurnAnswered,
     mySelectedAnswer, // 回傳我選的

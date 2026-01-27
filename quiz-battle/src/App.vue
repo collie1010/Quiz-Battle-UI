@@ -47,7 +47,7 @@
           <TimerBar 
             :key="currentQuestion?.index" 
             :timeLeft="timeLeft" 
-            :duration="8" />
+            :duration="10" />
         </div>
       </div>
 
@@ -57,7 +57,7 @@
         <!-- 左側：自己 -->
         <div class="side-column left">
           <PlayerPanel 
-            :name="playerInfo.playerId" 
+            :name="playerInfo.playerName" 
             :score="myScore" 
             :answered="isMyTurnAnswered" 
             :isTimeout="isTimeout" 
@@ -80,7 +80,7 @@
         <!-- 右側：對手 -->
         <div class="side-column right">
           <PlayerPanel 
-            :name="enemyId" 
+            :name="enemyName" 
             :score="enemyScore" 
             :answered="false" 
             :isSelf="false" 
@@ -95,8 +95,8 @@
       <ResultModal 
         :myScore="myScore"
         :enemyScore="enemyScore"
-        :myName="playerInfo.playerId"
-        :enemyName="enemyId"
+        :myName="playerInfo.playerName"
+        :enemyName="enemyName"
         @restart="handleRestart" 
       />
     </div>
@@ -123,7 +123,7 @@ const {
   totalQuestions,
   myScore,
   enemyScore,
-  enemyId,
+  enemyName,
   isTimeout, 
   isMyTurnAnswered,
   mySelectedAnswer, // 記得解構出來
@@ -133,7 +133,7 @@ const {
   submitAnswer
 } = useBattleGame()
 
-const { timeLeft, start } = useTimer(8)
+const { timeLeft, start } = useTimer(10)
 
 // 表單資料
 const inputName = ref('')
