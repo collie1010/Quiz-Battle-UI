@@ -222,6 +222,7 @@ export function useBattleGame() {
     totalQuestions,
     myScore,
     enemyScore,
+    enemyId, // 回傳對手 ID
     enemyName,
     isTimeout,
     isMyTurnAnswered,
