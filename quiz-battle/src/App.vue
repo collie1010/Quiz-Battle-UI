@@ -70,9 +70,10 @@
           <QuestionCard
             v-if="currentQuestion"
             :question="currentQuestion"
-            :locked="isMyTurnAnswered"
-            :mySelectedAnswer="mySelectedAnswer" 
+            :locked="isMyTurnAnswered || gameState === 'FINISHED'"
+            :mySelectedAnswer="mySelectedAnswer"
             :correctAnswer="correctAnswer"
+            :gameFinished="gameState === 'FINISHED'"
             @answer="onAnswer"
           />
         </div>
@@ -97,6 +98,9 @@
         :enemyScore="enemyScore"
         :myName="playerInfo.playerName"
         :enemyName="enemyName"
+        :myId="playerInfo.playerId"  
+        :winnerId="winnerId" 
+        :message="gameEndMessage"
         @restart="handleRestart" 
       />
     </div>
@@ -105,7 +109,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useBattleGame } from './composables/useBattleGame'
 import { useTimer } from './composables/useTimer'
 
@@ -126,14 +130,22 @@ const {
   enemyName,
   isTimeout, 
   isMyTurnAnswered,
-  mySelectedAnswer, // 記得解構出來
-  correctAnswer,    // 記得解構出來
+  mySelectedAnswer, 
+  correctAnswer,
+  winnerId,
+  gameEndMessage,
+  initialTime,
+  tryReconnect,    
   findMatch,
   resetGame,
   submitAnswer
 } = useBattleGame()
 
 const { timeLeft, start } = useTimer(10)
+
+onMounted(() => {
+  tryReconnect()
+})
 
 // 表單資料
 const inputName = ref('')
@@ -147,7 +159,7 @@ const handleMatch = () => {
 // 監聽題目變更，重置計時器
 watch(currentQuestion, (newVal) => {
   if (newVal) {
-    start(() => {
+    start(initialTime.value, () => {
       // 時間到自動送出空答案
       if (!isMyTurnAnswered.value) {
         // 這裡可以選擇自動送出一個錯誤答案，或者讓後端處理超時

@@ -31,7 +31,8 @@ const props = defineProps({
   question: Object,
   locked: Boolean,
   mySelectedAnswer: String, // 新增
-  correctAnswer: String     // 新增
+  correctAnswer: String,    // 新增
+  gameFinished: Boolean     // 新增：遊戲是否已結束
 })
 
 

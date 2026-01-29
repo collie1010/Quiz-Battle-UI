@@ -11,36 +11,131 @@ function generateUUID() {
 
 export function useBattleGame() {
   const gameState = ref('LOBBY')
-  const playerInfo = reactive({ 
-    roomId: '', 
+  const playerInfo = reactive({
+    roomId: '',
     playerId: '',
-    playerName: '' })
+    playerName: '' 
+  })
 
   const currentQuestion = ref(null)
-  const questionIndex = ref(0) // 目前題號 (0-based)
-  const totalQuestions = 10     // 總題數
+  const questionIndex = ref(0) 
+  const totalQuestions = 10     
 
   const myScore = ref(0)
   const enemyScore = ref(0)
-  const enemyId = ref('等待中...') // ⭐ 新增：對手 ID
-  const enemyName = ref('等待中...') 
+  const enemyId = ref('等待中...') 
+  const enemyName = ref('等待中...')
 
   const isMyTurnAnswered = ref(false)
-  const isTimeout = ref(false) 
-  const mySelectedAnswer = ref(null) // ⭐ 新增：我選了什麼
-  const correctAnswer = ref(null)    // ⭐ 新增：這題正確答案是什麼
+  const isTimeout = ref(false)
+  const mySelectedAnswer = ref(null) 
+  const correctAnswer = ref(null)    
 
-  const isMatching = ref(false) // 新增：是否正在配對中
+  const isMatching = ref(false) 
+  const winnerId = ref(null)
+  const gameEndMessage = ref('')
+  const initialTime = ref(10)
 
   let stompClient = null
-  let hiddenAnswer = null 
+  let hiddenAnswer = null
 
-  // 改名：joinGame -> findMatch (不需要 roomId 參數了)
+  // 儲存狀態 (只在確定進入房間後呼叫)
+  const saveState = () => {
+    // 防護：如果沒有 roomId，不要儲存 (避免存到髒資料)
+    if (!playerInfo.roomId) return
+
+    const state = {
+      roomId: playerInfo.roomId,
+      playerId: playerInfo.playerId,
+      playerName: playerInfo.playerName
+    }
+    localStorage.setItem('battle_state', JSON.stringify(state))
+  }
+
+  const clearState = () => {
+    localStorage.removeItem('battle_state')
+  }
+
+  // 訂閱房間頻道 (抽離共用邏輯)
+  const subscribeToRoom = (roomId) => {
+    if (stompClient && stompClient.connected) {
+      stompClient.subscribe(`/topic/room/${roomId}`, (msg) => {
+        handleMessage(JSON.parse(msg.body))
+      })
+    }
+  }
+
+  // 嘗試重連
+  const tryReconnect = () => {
+    const saved = localStorage.getItem('battle_state')
+    if (saved) {
+      try {
+        const state = JSON.parse(saved)
+        
+        // ⭐ 關鍵防護：如果沒有 roomId，代表上次根本沒配對成功，不需要重連
+        if (!state.roomId) {
+          clearState()
+          return false
+        }
+
+        console.log('偵測到未完成的遊戲，嘗試重連...', state)
+
+        // 恢復變數
+        playerInfo.roomId = state.roomId
+        playerInfo.playerId = state.playerId
+        playerInfo.playerName = state.playerName
+        gameState.value = 'WAITING' 
+
+        // 建立連線
+        stompClient = new Client({
+          webSocketFactory: () => new SockJS('http://localhost:8088/ws'),
+          reconnectDelay: 5000,
+        })
+
+        stompClient.onConnect = () => {
+          // 訂閱個人頻道 (接收重連失敗訊息)
+          stompClient.subscribe(`/topic/player/${state.playerId}`, (msg) => {
+             const body = JSON.parse(msg.body);
+             if (body.message && body.message.includes("失效")) {
+                alert(body.message);
+                resetGame(); // 回到大廳
+             }
+          })
+
+          // 訂閱房間頻道
+          subscribeToRoom(state.roomId)
+
+          // 發送重連請求
+          stompClient.publish({
+            destination: '/app/rejoin',
+            body: JSON.stringify({
+              roomId: state.roomId,
+              playerId: state.playerId,
+              playerName: state.playerName
+            })
+          })
+        }
+        stompClient.activate()
+        return true 
+      } catch (e) {
+        console.error('重連資料解析失敗', e)
+        clearState()
+        return false
+      }
+    }
+    return false
+  }
+
+  // 開始配對 (新遊戲)
   const findMatch = (inputNickname) => {
     const myUUID = generateUUID();
+    
+    // 重置狀態
     playerInfo.playerId = myUUID
     playerInfo.playerName = inputNickname
-    gameState.value = 'WAITING' // 顯示等待畫面
+    playerInfo.roomId = '' // ⭐ 確保清空舊的 roomId
+    
+    gameState.value = 'WAITING' 
     isMatching.value = true
 
     stompClient = new Client({
@@ -49,17 +144,20 @@ export function useBattleGame() {
     })
 
     stompClient.onConnect = () => {
-      // 1. ⭐ 訂閱「個人頻道」接收配對結果
+      // 訂閱個人頻道
       stompClient.subscribe(`/topic/player/${myUUID}`, (msg) => {
         const matchData = JSON.parse(msg.body)
-        
+
         if (matchData.success) {
           // 配對成功！
           console.log('配對成功，房間ID:', matchData.roomId)
           playerInfo.roomId = matchData.roomId
           isMatching.value = false
-          
-          // 2. ⭐ 訂閱「房間頻道」準備開始遊戲
+
+          // ⭐ 關鍵：拿到 RoomID 後才儲存狀態
+          saveState()
+
+          // 訂閱房間頻道
           subscribeToRoom(matchData.roomId)
         } else {
           // 還在找人...
@@ -67,51 +165,52 @@ export function useBattleGame() {
         }
       })
 
-      // 3. 發送配對請求
+      // 發送配對請求
       stompClient.publish({
         destination: '/app/match',
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           playerId: myUUID,
-          playerName: inputNickname }) // 不需要 roomId
+          playerName: inputNickname 
+        }) 
       })
     }
     stompClient.activate()
   }
 
-  // 抽離出來的訂閱房間邏輯
-  const subscribeToRoom = (roomId) => {
-    stompClient.subscribe(`/topic/room/${roomId}`, (msg) => {
-      handleMessage(JSON.parse(msg.body))
-    })
-  }
-
   const handleMessage = (data) => {
-    // 1. 收到新題目 (重置狀態)
+    // 1. 收到新題目
     if (data.question) {
       currentQuestion.value = data.question
       questionIndex.value = data.index
-      hiddenAnswer = data.question.answer 
-      correctAnswer.value = null 
+      hiddenAnswer = data.question.answer
+      correctAnswer.value = null
 
+      if (data.remainingTimeMs !== undefined) {
+        // 將毫秒轉為秒，並更新計時器
+        // 這裡需要配合 App.vue 的 watch 邏輯
+        initialTime.value = data.remainingTimeMs / 1000
+      } else {
+        initialTime.value = 10 // 預設 10 秒
+      }
+      // 更新對手資訊
       if (data.p1Id && data.p2Id) {
         if (data.p1Id === playerInfo.playerId) {
-          enemyId.value = data.p2Id // 我是 P1，對手是 P2
+          enemyId.value = data.p2Id 
           enemyName.value = data.p2Name
         } else {
-          enemyId.value = data.p1Id // 我是 P2，對手是 P1
+          enemyId.value = data.p1Id 
           enemyName.value = data.p1Name
         }
       }
 
+      // 防劇透顯示答案
       if (data.correctAnswer) {
-        // 只有當「我已經作答」或是「遊戲結束」時，才允許更新正確答案
-        // 這樣對手答對時，我的畫面只會更新分數，不會顯示綠色選項
         if (isMyTurnAnswered.value || data.gameOver) {
            correctAnswer.value = data.correctAnswer
         }
       }
 
-      // ⭐ 檢查是否已完成所有題目
+      // 檢查是否結束
       if (data.index >= totalQuestions) {
         gameState.value = 'FINISHED'
         return
@@ -120,62 +219,72 @@ export function useBattleGame() {
       gameState.value = 'PLAYING'
 
       // 重置每題狀態
-      isTimeout.value = false 
+      isTimeout.value = false
       isMyTurnAnswered.value = false
       mySelectedAnswer.value = null
       correctAnswer.value = null
     }
 
-    // 2. 收到分數與結果 (包含正確答案)
+    // 2. 收到分數與結果
     if (data.p1Score !== undefined) {
-      // ⭐ 關鍵邏輯：判斷我是 P1 還是 P2
       if (data.p1Id === playerInfo.playerId) {
-        // 我是 P1
         myScore.value = data.p1Score
         enemyScore.value = data.p2Score
-        enemyId.value = data.p2Id // 設定對手 ID
+        enemyId.value = data.p2Id 
       } else {
-        // 我是 P2
         myScore.value = data.p2Score
         enemyScore.value = data.p1Score
-        enemyId.value = data.p1Id // 設定對手 ID
+        enemyId.value = data.p1Id 
       }
 
-      // ⭐ 設定正確答案，觸發 UI 變色
-     // ⭐⭐⭐ 關鍵修正區塊開始 ⭐⭐⭐
-     if (data.correctAnswer) {
-      // 邏輯：後端雖然傳來了答案，但我不能馬上顯示給你看
-      // 條件 1: 我自己已經作答了 (isMyTurnAnswered.value === true) -> 可以顯示，確認對錯
-      // 條件 2: 遊戲已經結束了 (data.gameOver === true) -> 可以顯示，因為不用猜了
-      // 條件 3: 如果我都還沒答 -> 絕對不能更新 correctAnswer，否則會被劇透！
-      
-      if (isMyTurnAnswered.value || data.gameOver) {
-         correctAnswer.value = data.correctAnswer
+      // 防劇透顯示答案
+      if (data.correctAnswer) {
+        if (isMyTurnAnswered.value || data.gameOver) {
+           correctAnswer.value = data.correctAnswer
+        }
       }
-    }
-    // ⭐⭐⭐ 關鍵修正區塊結束 ⭐⭐⭐
 
-      // ⭐ 新增：接收遊戲結束訊號
       if (data.gameOver) {
-        gameState.value = 'FINISHED' // 直接切換狀態
+        gameState.value = 'FINISHED'
+        clearState() // 正常結束清除狀態
+
+        if (data.message) {
+          gameEndMessage.value = data.message
+        } else {
+          gameEndMessage.value = ''
+        }
+
+        // ⭐ 立即停止計時器，防止繼續倒數
+        if (typeof window !== 'undefined' && window.timerStop) {
+          window.timerStop()
+        }
+
+        if (data.winnerId) {
+          winnerId.value = data.winnerId
+        } else {
+          winnerId.value = null // 平手
+        }
       }
     }
 
+    // 錯誤處理 (例如房間已滿)
     if (data.message && data.targetPlayerId) {
       if (data.targetPlayerId === playerInfo.playerId) {
-        alert(data.message) // 顯示 "房間已滿"
-        gameState.value = 'LOBBY' // 踢回大廳
-        if (stompClient) stompClient.deactivate() // 斷開連線
+        // 這裡通常是 ErrorMessage
+        if (data.message.includes("失效") || data.message.includes("滿")) {
+             alert(data.message)
+             resetGame()
+        }
       }
     }
-    
   }
 
   const submitAnswer = (answerKey) => {
     if (isMyTurnAnswered.value) return
     isMyTurnAnswered.value = true
-    mySelectedAnswer.value = answerKey // 記錄我選的
+    mySelectedAnswer.value = answerKey 
 
+    // 本地即時回饋
     if (hiddenAnswer) {
       correctAnswer.value = hiddenAnswer
     }
@@ -185,33 +294,36 @@ export function useBattleGame() {
       body: JSON.stringify({
         roomId: playerInfo.roomId,
         playerId: playerInfo.playerId,
-        answer: answerKey, // 確保這裡是 "A", "B", "C", "D"
+        answer: answerKey, 
         answerTime: Date.now()
       })
     })
   }
 
-   // ⭐ 新增：重置遊戲狀態的方法
+   // 重置遊戲狀態 (回到大廳)
    const resetGame = () => {
-    // 1. 斷開 WebSocket 連線
+    clearState()
+    gameEndMessage.value = ''
+    
     if (stompClient && stompClient.active) {
       stompClient.deactivate()
     }
     stompClient = null
 
-    // 2. 重置所有狀態變數
     gameState.value = 'LOBBY'
     playerInfo.roomId = ''
-    // 注意：playerInfo.playerId 不用清空，讓玩家不用重新輸入名字
+    // 保留 playerName 方便下次輸入
     
     currentQuestion.value = null
     questionIndex.value = 0
     myScore.value = 0
     enemyScore.value = 0
     enemyId.value = '等待中...'
+    enemyName.value = '等待中...'
     isMyTurnAnswered.value = false
     mySelectedAnswer.value = null
     correctAnswer.value = null
+    isMatching.value = false
   }
 
   return {
@@ -222,12 +334,15 @@ export function useBattleGame() {
     totalQuestions,
     myScore,
     enemyScore,
-    enemyId, // 回傳對手 ID
-    enemyName,
+    enemyName, // UI 用
     isTimeout,
     isMyTurnAnswered,
-    mySelectedAnswer, // 回傳我選的
-    correctAnswer,    // 回傳正確答案
+    mySelectedAnswer, 
+    correctAnswer,  
+    winnerId,
+    initialTime, 
+    gameEndMessage, 
+    tryReconnect,
     findMatch,
     resetGame,
     submitAnswer
